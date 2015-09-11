@@ -223,5 +223,5 @@ case $__OCF_ACTION in
 	start)
 		ec2ip_start;;
 	*)	exit $OCF_ERR_UNIMPLEMENTED;;
-eac
+esac
 exit $?
