@@ -209,9 +209,6 @@ ec2ip_start() {
 	return $OCF_ERR_GENERIC
 }
 
-ec2ip_validate
-
-echo "Action: $__OCF_ACTION" >>/tmp/action
 case $__OCF_ACTION in 
 	meta-data) metadata
 		   exit $OCF_SUCCESS;;
