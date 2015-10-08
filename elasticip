@@ -216,10 +216,10 @@ case $__OCF_ACTION in
 	monitor)
 		ec2ip_monitor;;
 	stop)
-		ec2ip_stop;;
+		ec2ip_validate && ec2ip_stop;;
 	validate-all) ec2ip_validate;;
 	start)
-		ec2ip_start;;
+		ec2ip_validate && ec2ip_start;;
 	*)	exit $OCF_ERR_UNIMPLEMENTED;;
 esac
 exit $?
