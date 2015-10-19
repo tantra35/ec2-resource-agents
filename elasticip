@@ -99,7 +99,9 @@ ec2ip_load_credentials() {
 			[[ -z $EC2_ACCESS_KEY ]] || \
 			[[ -z $EC2_SECRET_KEY ]] && missing_cred=1
 			# TODO, load this from file OR set default
-			EC2_URL="https://ec2.amazonaws.com"
+			export EC2_ACCESS_KEY
+			export EC2_SECRET_KEY
+			export EC2_URL="https://ec2.amazonaws.com"
 			debugger "- Loaded euca-2ools credentials"
 			debugger "-- EC2_ACCESS_KEY = $EC2_ACCESS_KEY"
 			debugger "-- EC2_SECRET_KEY = $EC2_SECRET_KEY"
