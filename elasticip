@@ -40,6 +40,13 @@ Location of file containing appropriate credentials.
 <shortdesc lang="en">credentials</shortdesc>
 <content type="string" default="/root/.cred.txt" /> 
 </parameter> 
+<parameter name="iptype" required="0">
+<longdesc lang="en">
+type of ip (vpc|classic).
+</longdesc>
+<shortdesc lang="en">iptype</shortdesc>
+<content type="string" default="classic" /> 
+</parameter> 
 </parameters>
 <actions>
 <action name="start" timeout="180" />
@@ -63,165 +70,212 @@ AWS_COMMAND="aws"
 AWS_TIMEOUT=60
 
 debugger() {
-	[[ $debug != 0 ]] && ocf_log info $1
-	return $OCF_SUCCESS
+    [[ $debug != 0 ]] && ocf_log info $1
+    return $OCF_SUCCESS
 }
 ec2ip_metadata() {
-	EC2_INSTANCE_ID=$(ec2metadata --instance-id)
-	EC2_PUBLIC_IP=$(ec2metadata --public-ipv4)
+    EC2_INSTANCE_ID=$(ec2metadata --instance-id)
+    EC2_PUBLIC_IP=$(ec2metadata --public-ipv4)
 }
 
 ec2ip_load_credentials() {
-	debugger "load_credentials:"
-	local missing_cred
-	[[ ! -e $OCF_RESKEY_credentials ]] && ocf_log error "EC2: ERROR: Credentials file not found at $OCF_RESKEY_credentials" \
-		exit $OCF_ERR_INSTALLED
-	case $OCF_RESKEY_api_tools in
-		"ec2-api-tools")
-			. $OCF_RESKEY_credentials
-			[[ -z $EC2_PRIVATE_KEY ]] || \
-			[[ -z $EC2_CERT ]] || \
-			[[ -z $EC2_KEY ]] || \
-			[[ -z $EC2_KEYID ]] && missing_cred=1
-			debugger "- Loaded ec2-api-tools credentials"
-			debugger "-- EC2_PRIVATE_KEY = $EC2_PRIVATE_KEY"
-			debugger "-- EC2_CERT = $EC2_CERT"
-			debugger "-- EC2_KEY = $EC2_KEY"
-			debugger "-- EC2_KEYID= $EC2_KEYID"
-	
-			;;
-		"aws")  # AWS credentials get loaded via file, not environment
-			[[ $OCF_RESKEY_credentials != "/root/.awssecret" ]] && missing_cred=1
-			debugger "- Found aws secrets @ $OCF_RESKEY_credentials"
-		;;
-		"euca-2ools")
-			. $OCF_RESKEY_credentials
-			[[ -z $EC2_ACCESS_KEY ]] || \
-			[[ -z $EC2_SECRET_KEY ]] && missing_cred=1
-			# TODO, load this from file OR set default
-			export EC2_ACCESS_KEY
-			export EC2_SECRET_KEY
-			export EC2_URL="https://ec2.amazonaws.com"
-			debugger "- Loaded euca-2ools credentials"
-			debugger "-- EC2_ACCESS_KEY = $EC2_ACCESS_KEY"
-			debugger "-- EC2_SECRET_KEY = $EC2_SECRET_KEY"
-			;;
-	esac
-	[[ $missing_cred -eq 1 ]] && \
-		ocf_log error "EC2 ERROR: Missing credentials for $OCF_RESKEY_api_tools in $OCF_RESKEY_credentials" && \
-		exit $OCF_ERR_INSTALLED
-	return 0
+    debugger "load_credentials:"
+    local missing_cred
+    [[ ! -e $OCF_RESKEY_credentials ]] && ocf_log error "EC2: ERROR: Credentials file not found at $OCF_RESKEY_credentials" \
+	exit $OCF_ERR_INSTALLED
+    case $OCF_RESKEY_api_tools in
+	"ec2-api-tools")
+	    . $OCF_RESKEY_credentials
+	    [[ -z $EC2_PRIVATE_KEY ]] || \
+	    [[ -z $EC2_CERT ]] || \
+	    [[ -z $EC2_KEY ]] || \
+	    [[ -z $EC2_KEYID ]] && missing_cred=1
+            export EC2_PRIVATE_KEY
+            export EC2_CERT
+	    export EC2_KEY
+	    export EC2_KEYID
+	    debugger "- Loaded ec2-api-tools credentials"
+	    debugger "-- EC2_PRIVATE_KEY = $EC2_PRIVATE_KEY"
+	    debugger "-- EC2_CERT = $EC2_CERT"
+	    debugger "-- EC2_KEY = $EC2_KEY"
+	    debugger "-- EC2_KEYID= $EC2_KEYID"
+    
+	    ;;
+	"aws")  # AWS credentials get loaded via file, not environment
+	    [[ $OCF_RESKEY_credentials != "/root/.awssecret" ]] && missing_cred=1
+	    debugger "- Found aws secrets @ $OCF_RESKEY_credentials"
+	;;
+	"euca-2ools")
+	    . $OCF_RESKEY_credentials
+	    [[ -z $EC2_ACCESS_KEY ]] || \
+	    [[ -z $EC2_SECRET_KEY ]] && missing_cred=1
+	    # TODO, load this from file OR set default
+            export EC2_ACCESS_KEY
+            export EC2_SECRET_KEY
+	    export EC2_URL="https://ec2.amazonaws.com"
+	    debugger "- Loaded euca-2ools credentials"
+	    debugger "-- EC2_ACCESS_KEY = $EC2_ACCESS_KEY"
+	    debugger "-- EC2_SECRET_KEY = $EC2_SECRET_KEY"
+	    ;;
+    esac
+    [[ $missing_cred -eq 1 ]] && \
+	ocf_log error "EC2 ERROR: Missing credentials for $OCF_RESKEY_api_tools in $OCF_RESKEY_credentials" && \
+	exit $OCF_ERR_INSTALLED
+    return 0
 }
 
 ec2ip_validate() {
-	debugger "validate"
-	[[ -z $OCF_RESKEY_address ]] && ocf_log error "EC2 ERROR: address param not set $OCF_RESKEY_ADDRESS!" && exit $OCF_ERR_CONFIGURED
-	case $OCF_RESKEY_api_tools in
-		"ec2-api-tools")
-			ASSOCIATE_CMD="ec2-associate-address"
-			DISASSOCIATE_CMD="ec2-disassociate-address"
-			EC2_COMMANDS="$ASSOCIATE_CMD $DISASSOCIATE_CMD"
-			;;
-		"aws")
-			ASSOCIATE_CMD="aws associate-address"
-			DISASSOCIATE_CMD="aws disassociate-address"
-			EC2_COMMANDS="aws"
-			;;
-		"euca-2ools")
-			ASSOCIATE_CMD="euca-associate-address"
-			DISASSOCIATE_CMD="euca-disassociate-address"
-			EC2_COMMANDS="euca-associate-address euca-disassociate-address"
-			;;
-		*) ocf_log error "EC2 ERROR: Invalid api tools flavor: $OCF_RESKEY_api_tools" && exit $OCF_ERR_CONFIGURED
-			;;
-	esac
-	ec2ip_load_credentials
+    debugger "validate"
+    [[ -z $OCF_RESKEY_address ]] && ocf_log error "EC2 ERROR: address param not set $OCF_RESKEY_ADDRESS!" && exit $OCF_ERR_CONFIGURED
+    case $OCF_RESKEY_api_tools in
+	"ec2-api-tools")
+	    ASSOCIATE_CMD="ec2-associate-address"
+	    DISASSOCIATE_CMD="ec2-disassociate-address"
+	    EC2_COMMANDS="$ASSOCIATE_CMD $DISASSOCIATE_CMD"
+	    ;;
+	"aws")
+	    ASSOCIATE_CMD="aws associate-address"
+	    DISASSOCIATE_CMD="aws disassociate-address"
+	    EC2_COMMANDS="aws"
+	    ;;
+	"euca-2ools")
+	    ASSOCIATE_CMD="euca-associate-address"
+	    DISASSOCIATE_CMD="euca-disassociate-address"
+	    EC2_COMMANDS="euca-associate-address euca-disassociate-address"
+	    ;;
+	*) ocf_log error "EC2 ERROR: Invalid api tools flavor: $OCF_RESKEY_api_tools" && exit $OCF_ERR_CONFIGURED
+	    ;;
+    esac
+    ec2ip_load_credentials
 
-	EC2_COMMANDS="$EC2_COMMANDS ec2metadata"
-	for i in $EC2_COMMANDS ; do
-		debugger "- Locating command $i: "
-		[[ ! -x $(which $i) ]] && ocf_log error "ERROR: Command $i not found/exectuable" && exit $OCF_ERR_INSTALLED
-		debugger "found"
-	done
+    EC2_COMMANDS="$EC2_COMMANDS ec2metadata"
+    for i in $EC2_COMMANDS ; do
+	debugger "- Locating command $i: "
+	[[ ! -x $(which $i) ]] && ocf_log error "ERROR: Command $i not found/exectuable" && exit $OCF_ERR_INSTALLED
+	debugger "found"
+    done
 }
 
 ec2ip_monitor() {
-	debugger "monitor"
-	ec2ip_metadata
-	[[ $EC2_PUBLIC_IP == $OCF_RESKEY_address ]]  && debugger "Running" && return $OCF_SUCCESS
-	debugger "Not running"
-	return $OCF_NOT_RUNNING	
+    debugger "monitor"
+    ec2ip_metadata
+    [[ $EC2_PUBLIC_IP == $OCF_RESKEY_address ]]  && debugger "Running" && return $OCF_SUCCESS
+    debugger "Not running"
+    return $OCF_NOT_RUNNING	
 }
 
 
 ###### GENERIC
 ec2ip_disassociate() {
 	debugger "ec2ip_disassociate: $DISASSOCIATE_CMD"
-	$DISASSOCIATE_CMD $OCF_RESKEY_address 
-	[[ $? != 0 ]] && debugger "- failed" && return $OCF_ERR_GENERIC
+
+	if [ "$OCF_RESKEY_iptype" == "vpc" ]; then
+		ec2ip_metadata
+
+		case $OCF_RESKEY_api_tools in
+			"euca-2ools")
+				l_cols=( `euca-describe-addresses --show-empty-fields --filter instance-id=$EC2_INSTANCE_ID $OCF_RESKEY_address` );
+				IP_eipassoc=${l_cols[5]}
+			;;
+		esac
+
+		$DISASSOCIATE_CMD --association-id $IP_eipassoc
+
+	else
+		$DISASSOCIATE_CMD $OCF_RESKEY_address
+	fi
+
+	if [ $? != 0 ]; then
+		debugger "- failed"
+		return $OCF_ERR_GENERIC
+	fi
+
 	debugger "- success"
 	return $OCF_SUCCESS
 }
 
 ec2ip_associate() {
 	debugger "ec2ip_associate: $ASSOCIATE_CMD"
-	$ASSOCIATE_CMD $OCF_RESKEY_address -i $EC2_INSTANCE_ID
-	[[ $? != 0 ]] && debugger "- failed, rc: $?" && return $OCF_ERR_GENERIC
+
+	if [ "$OCF_RESKEY_iptype" == "vpc" ]; then
+		ec2ip_metadata
+
+		case $OCF_RESKEY_api_tools in
+			"euca-2ools")
+				l_cols=( `euca-describe-addresses --show-empty-fields $OCF_RESKEY_address` );
+				IP_eipalloc=${l_cols[4]}
+				;;
+		esac
+
+		$ASSOCIATE_CMD -i $EC2_INSTANCE_ID --allocation-id $IP_eipalloc
+
+	else
+		$ASSOCIATE_CMD  -i $EC2_INSTANCE_ID $OCF_RESKEY_address
+	fi
+
+	if [ $? != 0 ]; then
+		debugger "- failed, rc: $?"
+		return $OCF_ERR_GENERIC
+	fi
+
 	debugger "-success"
 	return $OCF_SUCCESS
 }
 
 ec2ip_stop() {
-	ocf_log info "EC2: Bringing down elastic ip $OCF_RESKEY_address"
-	local i 
+    ocf_log info "EC2: Bringing down elastic ip $OCF_RESKEY_address"
+    local i 
+    ec2ip_monitor
+    [[ $? == $OCF_NOT_RUNNING ]] && ocf_log info "EC2: Address $OCF_RESKEY_address already down" && return $OCF_SUCCESS
+    ocf_log info "EC2: Sending request to AWS via $OCF_RESKEY_api_tools"
+    ec2ip_disassociate
+    [[ $? != $OCF_SUCCESS ]] && return $OCF_ERR_GENERIC
+    i=0
+    ocf_log info "EC2: API request sent, waiting for IP to go down."
+    debugger "Stop loop"
+    while [[ $i -le $AWS_TIMEOUT ]] ; do
 	ec2ip_monitor
-	[[ $? == $OCF_NOT_RUNNING ]] && ocf_log info "EC2: Address $OCF_RESKEY_address already down" && return $OCF_SUCCESS
-	ocf_log info "EC2: Sending request to AWS via $OCF_RESKEY_api_tools"
-	ec2ip_disassociate
-	[[ $? != $OCF_ERR_SUCCESS ]] && return $OCF_ERR_GENERIC
-	i=0
-	ocf_log info "EC2: API request sent, waiting for IP to go down."
-	debugger "Stop loop"
-	while [[ $i -le $AWS_TIMEOUT ]] ; do
-		ec2ip_monitor
-		[[ $? == $OCF_NOT_RUNNING ]] && ocf_log info "EC2: Successfully brought down $OCF_RESKEY_address" &&  return $OCF_SUCCESS
-		sleep 1
-		i=$[$i+1]
-	done
-	ocf_log error "EC2: ERROR timeout reached ($AWS_TIMEOUT) while waiting for IP to get released." 
-	return $OCF_ERR_GENERIC
+	if [ $? == $OCF_NOT_RUNNING ]; then 
+	    ocf_log info "EC2: Successfully brought down $OCF_RESKEY_address"
+	    return $OCF_SUCCESS
+	fi
+	sleep 1
+	i=$[$i+1]
+    done
+    ocf_log error "EC2: ERROR timeout reached ($AWS_TIMEOUT) while waiting for IP to get released." 
+    return $OCF_ERR_GENERIC
 }
 
 ec2ip_start() {
-	local i
-	ocf_log info "EC2: Starting elastic ip $OCF_RESKEY_address"
+    local i
+    ocf_log info "EC2: Starting elastic ip $OCF_RESKEY_address"
+    ec2ip_monitor
+    [[ $? == $OCF_SUCCESS ]] && ocf_log info "EC2: $OCF_RESKEY_address already started" && return $OCF_SUCCESS
+    ocf_log info "EC2: Sending request to AWS via $OCF_RESKEY_api_tools"
+    ec2ip_associate 
+    [[ $? != 0 ]] && echo "ERROR: Received $? from 'aws'" && return $OCF_ERR_GENERIC
+    i=0
+    ocf_log info "EC2: API request sent, waiting for IP."
+    while [[ $i -le $AWS_TIMEOUT ]] ; do
 	ec2ip_monitor
-	[[ $? == $OCF_SUCCESS ]] && ocf_log info "EC2: $OCF_RESKEY_address already started" && return $OCF_SUCCESS
-	ocf_log info "EC2: Sending request to AWS via $OCF_RESKEY_api_tools"
-	ec2ip_associate 
-	[[ $? != 0 ]] && echo "ERROR: Received $? from 'aws'" && return $OCF_ERR_GENERIC
-	i=0
-	ocf_log info "EC2: API request sent, waiting for IP."
-	while [[ $i -le $AWS_TIMEOUT ]] ; do
-		ec2ip_monitor
-		[[ $? == $OCF_SUCCESS ]] &&  return $?
-		sleep 1
-		i=$[$i+1]
-	done
-	ocf_log error "EC2: ERROR timeout reached ($AWS_TIMEOUT sec) while waiting for IP"
-	return $OCF_ERR_GENERIC
+	[[ $? == $OCF_SUCCESS ]] &&  return $?
+	sleep 1
+	i=$[$i+1]
+    done
+    ocf_log error "EC2: ERROR timeout reached ($AWS_TIMEOUT sec) while waiting for IP"
+    return $OCF_ERR_GENERIC
 }
 
 case $__OCF_ACTION in 
-	meta-data) metadata
-		   exit $OCF_SUCCESS;;
-	monitor)
-		ec2ip_monitor;;
-	stop)
-		ec2ip_validate && ec2ip_stop;;
-	validate-all) ec2ip_validate;;
-	start)
-		ec2ip_validate && ec2ip_start;;
-	*)	exit $OCF_ERR_UNIMPLEMENTED;;
+    meta-data) metadata
+	   exit $OCF_SUCCESS;;
+    monitor)
+	ec2ip_monitor;;
+    stop)
+	ec2ip_validate && ec2ip_stop;;
+    validate-all) ec2ip_validate;;
+    start)
+	ec2ip_validate && ec2ip_start;;
+    *)	exit $OCF_ERR_UNIMPLEMENTED;;
 esac
 exit $?
